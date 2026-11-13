@@ -1,0 +1,17 @@
+name: Interactive Ubuntu Shell
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-env:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Start tmate session
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 60
+        with:
+          limit-access-to-actor: true

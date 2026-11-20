@@ -15,7 +15,7 @@ jobs:
       - name: Set up ANSI C, Vi, and Traditional Unix Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential tmate bsdmainutils vim-tiny telnet ed man-db
+          sudo apt-get install -y build-essential tmate bsdmainutils vim-tiny telnet ed man-db openssh-client
           sudo bash -c 'cat << "EOF" > /usr/local/bin/cc
           #!/bin/bash
           exec /usr/bin/gcc -ansi -pedantic -Wall -Wextra "\$@"
@@ -32,22 +32,27 @@ jobs:
           cp helloworld.c /home/runner/helloworld.c
 
       - name: Launch Interactive Shell Session
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          [ -f ~/.ssh/id_rsa ] || ssh-keygen -t rsa -f ~/.ssh/id_rsa -N '' -q
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
           TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
           TMATE_WEB=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
-          
+
           echo "=========================================="
           echo "SSH Command: $TMATE_SSH"
           echo "Web Shell URL: $TMATE_WEB"
           echo "=========================================="
-          
+
           echo "### 🚀 Ubuntu VM is Ready!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Web Terminal:** [$TMATE_WEB]($TMATE_WEB)" >> $GITHUB_STEP_SUMMARY
           echo "- **SSH Command:** \`\" >> $GITHUB_STEP_SUMMARY
-          
+
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="**Web Terminal:** $TMATE_WEB | **SSH:** \`\" || true
+
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -B session-info
@@ -58,6 +63,6 @@ jobs:
           EOF
           git add session.md
           git commit -m "Update live session connection details"
-          git push -f origin session-info
-          
+          git push -f https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git session-info || true
+
           sleep 3600

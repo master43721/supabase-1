@@ -15,7 +15,7 @@ jobs:
       - name: Set up ANSI C, Vi, and Traditional Unix Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential tmate bsdmainutils vim-tiny telnet ed man-db openssh-client
+          sudo apt-get install -y build-essential bsdmainutils vim-tiny telnet ed man-db openssh-client curl
           sudo bash -c 'cat << "EOF" > /usr/local/bin/cc
           #!/bin/bash
           exec /usr/bin/gcc -ansi -pedantic -Wall -Wextra "\$@"
@@ -35,34 +35,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          [ -f ~/.ssh/id_rsa ] || ssh-keygen -t rsa -f ~/.ssh/id_rsa -N '' -q
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-          TMATE_WEB=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
-
+          curl -sL https://github.com/owenthereal/upterm/releases/download/v0.41.1/upterm_linux_amd64.deb -o /tmp/upterm.deb
+          sudo apt install -y /tmp/upterm.deb
+          [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N '' -q
+          upterm host --server wss://uptermd.upterm.dev:443 --force-command bash &
+          sleep 5
+          SSH_CMD=$(upterm session current | grep 'SSH Session:' | sed 's/SSH Session: //')
           echo "=========================================="
-          echo "SSH Command: $TMATE_SSH"
-          echo "Web Shell URL: $TMATE_WEB"
+          echo "SSH COMMAND: $SSH_CMD"
           echo "=========================================="
-
           echo "### 🚀 Ubuntu VM is Ready!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Web Terminal:** [$TMATE_WEB]($TMATE_WEB)" >> $GITHUB_STEP_SUMMARY
-          echo "- **SSH Command:** \`\" >> $GITHUB_STEP_SUMMARY
+          echo "Run this command in PowerShell / CMD to connect:" >> $GITHUB_STEP_SUMMARY
+          echo "\\\ash" >> $GITHUB_STEP_SUMMARY
+          echo "$SSH_CMD" >> $GITHUB_STEP_SUMMARY
+          echo "\\\" >> $GITHUB_STEP_SUMMARY
 
-          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="**Web Terminal:** $TMATE_WEB | **SSH:** \`\" || true
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="SSH_COMMAND: $SSH_CMD" || true
 
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -B session-info
-          cat << EOF > session.md
-          # Ubuntu Session Details
-          - **Web Terminal:** $TMATE_WEB
-          - **SSH Command:** $TMATE_SSH
-          EOF
-          git add session.md
-          git commit -m "Update live session connection details"
-          git push -f https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git session-info || true
+          echo "$SSH_CMD" > session.txt
+          git add session.txt
+          git commit -m "Update live SSH command"
+          git push -f origin session-info || true
 
           sleep 3600

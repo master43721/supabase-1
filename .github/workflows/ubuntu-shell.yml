@@ -12,35 +12,51 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up ANSI C and Vi
+      - name: Set up ANSI C, Vi, and Traditional Unix Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bsdmainutils vim-tiny telnet ed man-db openssh-client curl
+          sudo apt-get install -y build-essential bsdmainutils vim-tiny telnet ed man-db openssh-client curl openssh-server
           printf '#!/bin/bash\nexec /usr/bin/gcc -ansi -pedantic -Wall -Wextra "$@"\n' | sudo tee /usr/local/bin/cc
           sudo chmod +x /usr/local/bin/cc
           printf '#include <stdio.h>\n\nint main(void) {\n    printf("Hello, Traditional ANSI C World!\\n");\n    return 0;\n}\n' > helloworld.c
           cp helloworld.c /home/runner/helloworld.c
 
-      - name: Launch Interactive Shell Session
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Launch Web Terminal & SSH Session
         run: |
-          curl -sL https://github.com/owenthereal/upterm/releases/download/v0.41.1/upterm_linux_amd64.deb -o /tmp/upterm.deb
-          sudo apt install -y /tmp/upterm.deb
-          mkdir -p ~/.ssh
-          [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -q
-          upterm host --server wss://uptermd.upterm.dev:443 --force-command bash &
-          sleep 5
-          SSH_CMD=$(upterm session current | grep 'SSH Session:' | sed 's/SSH Session: //')
+          sudo curl -sLo /usr/local/bin/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
+          sudo chmod +x /usr/local/bin/ttyd
+
+          cd /home/runner
+          ttyd -p 7681 bash &
+
+          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:7681 a.pinggy.io > /tmp/pinggy_web.log 2>&1 &
+
+          echo "runner:ubuntu" | sudo chpasswd
+          sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo systemctl restart ssh || sudo service ssh restart
+          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:22 tcp@a.pinggy.io > /tmp/pinggy_ssh.log 2>&1 &
+
+          sleep 6
+
+          WEB_URL=$(grep -o 'https://[a-zA-Z0-9.-]*\.pinggy\.link' /tmp/pinggy_web.log | head -n 1)
+          SSH_LINE=$(grep -o 'ssh [a-zA-Z0-9@.: -]*' /tmp/pinggy_ssh.log | head -n 1)
+
           echo "=========================================="
-          echo "SSH COMMAND: $SSH_CMD"
+          echo "WEB TERMINAL: $WEB_URL"
+          echo "SSH COMMAND: $SSH_LINE"
           echo "=========================================="
-          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$SSH_CMD" || true
+
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -B session-info
-          echo "$SSH_CMD" > session.txt
-          git add session.txt
-          git commit -m "Update live SSH command"
+          cat << EOF > session.md
+          # Ubuntu Session Details
+          WEB_URL=$WEB_URL
+          SSH_CMD=$SSH_LINE (password: ubuntu)
+          EOF
+          git add session.md
+          git commit -m "Update live session connection details"
           git push -f origin session-info || true
+
           sleep 3600

@@ -15,48 +15,54 @@ jobs:
       - name: Set up ANSI C, Vi, and Traditional Unix Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bsdmainutils vim-tiny telnet ed man-db openssh-client curl openssh-server
+          sudo apt-get install -y build-essential bsdmainutils vim-tiny telnet ed man-db curl
           printf '#!/bin/bash\nexec /usr/bin/gcc -ansi -pedantic -Wall -Wextra "$@"\n' | sudo tee /usr/local/bin/cc
           sudo chmod +x /usr/local/bin/cc
           printf '#include <stdio.h>\n\nint main(void) {\n    printf("Hello, Traditional ANSI C World!\\n");\n    return 0;\n}\n' > helloworld.c
           cp helloworld.c /home/runner/helloworld.c
 
-      - name: Launch Web Terminal & SSH Session
+      - name: Launch Interactive Web Terminal
         run: |
+          # 1. Download ttyd and cloudflared
           sudo curl -sLo /usr/local/bin/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
           sudo chmod +x /usr/local/bin/ttyd
+          sudo curl -sLo /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          sudo chmod +x /usr/local/bin/cloudflared
 
-          cd /home/runner
-          ttyd -p 7681 bash &
+          # 2. Start ttyd with full write access in the workspace
+          ttyd -W -p 7681 bash &
 
-          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:7681 a.pinggy.io > /tmp/pinggy_web.log 2>&1 &
+          # 3. Create Cloudflare Quick Tunnel
+          cloudflared tunnel --url http://127.0.0.1:7681 > /tmp/cf_tunnel.log 2>&1 &
 
-          echo "runner:ubuntu" | sudo chpasswd
-          sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo systemctl restart ssh || sudo service ssh restart
-          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:22 tcp@a.pinggy.io > /tmp/pinggy_ssh.log 2>&1 &
-
+          # 4. Wait for tunnel URL
           sleep 6
-
-          WEB_URL=$(grep -o 'https://[a-zA-Z0-9.-]*\.pinggy\.link' /tmp/pinggy_web.log | head -n 1)
-          SSH_LINE=$(grep -o 'ssh [a-zA-Z0-9@.: -]*' /tmp/pinggy_ssh.log | head -n 1)
+          TUNNEL_URL=""
+          for i in {1..10}; do
+            TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' /tmp/cf_tunnel.log | head -n 1)
+            if [ -n "$TUNNEL_URL" ]; then
+              break
+            fi
+            sleep 2
+          done
 
           echo "=========================================="
-          echo "WEB TERMINAL: $WEB_URL"
-          echo "SSH COMMAND: $SSH_LINE"
+          echo "LIVE WEB TERMINAL URL: $TUNNEL_URL"
           echo "=========================================="
 
+          # 5. Export to Step Summary
+          echo "### 🚀 Ubuntu VM is Ready!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[Click here to open Ubuntu Terminal]($TUNNEL_URL)" >> $GITHUB_STEP_SUMMARY
+
+          # 6. Push to session-info branch
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -B session-info
-          cat << EOF > session.md
-          # Ubuntu Session Details
-          WEB_URL=$WEB_URL
-          SSH_CMD=$SSH_LINE (password: ubuntu)
-          EOF
-          git add session.md
-          git commit -m "Update live session connection details"
+          echo "$TUNNEL_URL" > session.txt
+          git add session.txt
+          git commit -m "Live Web Terminal: $TUNNEL_URL"
           git push -f origin session-info || true
 
+          # 7. Keep VM alive for 60 minutes
           sleep 3600
